@@ -91,36 +91,15 @@ def get_affine_matrix(
 class FlyPathCollection(PathCollection):
     def __init__(
         self,
-        xy=(0, 0),
-        rotation=90,
-        length=3,
-        width=None,
-        origin=(0.65, 0.5),
         alpha=1,
         grayscale=False,
         svg_path=get_data_dir() / "fly.svg",
-        ax=None,
         **kwargs,
     ):
         """Create a fly from an SVG file.
 
         Parameters
         ----------
-        xy : tuple, optional
-            The position of the fly in the data coordinates. The default is
-            (0, 0).
-        rotation : float, optional
-            The rotation angle in degrees. The default is 90.
-        length : float, optional
-            The length of the fly. The default is 3.
-        width : float, optional
-            The width of the fly. The default is None (scaled according to the
-            length).
-        origin : tuple, optional
-            The origin of the fly in the bounding box. (0, 0) is the
-            posterior-right corner, (1, 0) is the anterior-right corner, and
-            (0, 1) is the posterior-left corner. The default is (0.65, 0.5)
-            (thorax).
         alpha : float, optional
             Multiply the alpha channel of the colors by this value. The
             default is 1.
@@ -129,15 +108,10 @@ class FlyPathCollection(PathCollection):
         svg_path : Path, optional
             The path to the SVG file. The default is the fly.svg file in the
             data directory.
-        ax : Axes, optional
-            The axes to add the fly to. The default is the current axes.
         **kwargs
             Additional keyword arguments passed to the PathCollection
             constructor.
         """
-        assert not (
-            width is not None and length is not None
-        ), "Only one of width or length can be specified"
 
         root = ElementTree.parse(svg_path).getroot()
         elems = root.findall(".//{http://www.w3.org/2000/svg}path")
@@ -157,22 +131,6 @@ class FlyPathCollection(PathCollection):
         super().__init__(
             paths, edgecolors=ecs, facecolors=fcs, alpha=alpha, linewidths=lws, **kwargs
         )
-        bbox = get_collection_bbox(self)
-        affine2d = get_affine_matrix(
-            bbox=bbox,
-            source_xy=origin,
-            target_xy=xy,
-            rotation=rotation,
-            width=length,
-            height=width,
-        )
-
-        if ax is None:
-            ax = plt.gca()
-
-        self.set_transform(affine2d + ax.transData)
-        ax.add_collection(self)
-        ax.autoscale()
 
 
 def add_fly(
@@ -181,6 +139,7 @@ def add_fly(
     length=3,
     width=None,
     origin=(0.65, 0.5),
+    transform=None,
     svg_path=get_data_dir() / "fly.svg",
     ax=None,
     **kwargs,
@@ -205,6 +164,9 @@ def add_fly(
         posterior-right corner, (1, 0) is the anterior-right corner, and
         (0, 1) is the posterior-left corner. The default is (0.65, 0.5)
         (thorax).
+    transform : Transform, optional
+        The transform to apply to the fly. The default is None, which
+        applies the ax.transData transform.
     svg_path : Path, optional
         The path to the SVG file. The default is the fly.svg file in the data
         directory.
@@ -218,14 +180,26 @@ def add_fly(
     FlyPathCollection
         The fly path collection.
     """
-    fly = FlyPathCollection(
-        xy=xy,
+    fly = FlyPathCollection(svg_path=svg_path, **kwargs)
+
+    bbox = get_collection_bbox(fly)
+    affine2d = get_affine_matrix(
+        bbox=bbox,
+        source_xy=origin,
+        target_xy=xy,
         rotation=rotation,
-        length=length,
-        width=width,
-        origin=origin,
-        svg_path=svg_path,
-        ax=ax,
-        **kwargs,
+        width=length,
+        height=width,
     )
+
+    if ax is None:
+        ax = plt.gca()
+
+    if transform is None:
+        transform = ax.transData
+
+    fly.set_transform(affine2d + transform)
+    ax.add_collection(fly)
+    ax.autoscale()
+
     return fly
