@@ -1,3 +1,5 @@
+from typing import Iterable
+import re
 import numpy as np
 from matplotlib.collections import Collection, PathCollection
 from matplotlib.transforms import Bbox
@@ -94,6 +96,7 @@ class FlyPathCollection(PathCollection):
         alpha=1,
         grayscale=False,
         svg_path=get_data_dir() / "fly.svg",
+        exclude: Iterable[str] = (),
         **kwargs,
     ):
         """Create a fly from an SVG file.
@@ -108,6 +111,8 @@ class FlyPathCollection(PathCollection):
         svg_path : Path, optional
             The path to the SVG file. The default is the fly.svg file in the
             data directory.
+        exclude : Iterable[str], optional
+            A list of regular expressions to exclude paths by their ID.
         **kwargs
             Additional keyword arguments passed to the PathCollection
             constructor.
@@ -115,6 +120,13 @@ class FlyPathCollection(PathCollection):
 
         root = ElementTree.parse(svg_path).getroot()
         elems = root.findall(".//{http://www.w3.org/2000/svg}path")
+        ids = [e.attrib.get("id", "") for e in elems]
+
+        if isinstance(exclude, str):
+            exclude = (exclude,)
+
+        is_included = [not any(re.match(r, i) for r in exclude) for i in ids]
+        elems = [e for e, i in zip(elems, is_included) if i]
         paths = [parse_path(e.attrib["d"]) for e in elems]
         fcs = [e.attrib.get("fill", "none") for e in elems]
         ecs = [e.attrib.get("stroke", "none") for e in elems]
