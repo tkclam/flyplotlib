@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
 
 setup(
     name="flyplotlib",
-    version="0.2.0",
+    version="0.3.0",
     author="Thomas Ka Chung Lam",
     author_email="thomas.lam@epfl.ch",
     description="Add flies to matplotlib plots.",
