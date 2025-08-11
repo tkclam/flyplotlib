@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Iterable
 import re
 import numpy as np
@@ -153,6 +154,8 @@ def add_fly(
     origin=(0.65, 0.5),
     transform=None,
     svg_path=get_data_dir() / "fly.svg",
+    exclude=(),
+    bbox_exclude=("leg", "wing"),
     ax=None,
     **kwargs,
 ):
@@ -182,6 +185,11 @@ def add_fly(
     svg_path : Path, optional
         The path to the SVG file. The default is the fly.svg file in the data
         directory.
+    exclude : Iterable[str], optional
+        A list of regular expressions to exclude paths by their ID.
+    bbox_exclude : Iterable[str], optional
+        A list of regular expressions to exclude paths when calculating the
+        bounding box.
     ax : Axes, optional
         The axes to add the fly to. The default is the current axes.
     **kwargs
@@ -192,9 +200,21 @@ def add_fly(
     FlyPathCollection
         The fly path collection.
     """
-    fly = FlyPathCollection(svg_path=svg_path, **kwargs)
+    svg_path = Path(svg_path)
+    if not svg_path.exists():
+        if not svg_path.is_absolute():
+            svg_path = get_data_dir() / svg_path
+        else:
+            raise FileNotFoundError(f"SVG file not found: {svg_path}")
 
-    bbox = get_collection_bbox(fly)
+    fly = FlyPathCollection(svg_path=svg_path, exclude=exclude, **kwargs)
+
+    if bbox_exclude:
+        temp_fly = FlyPathCollection(svg_path=svg_path, exclude=bbox_exclude, **kwargs)
+        bbox = get_collection_bbox(temp_fly)
+    else:
+        bbox = get_collection_bbox(fly)
+
     affine2d = get_affine_matrix(
         bbox=bbox,
         source_xy=origin,
