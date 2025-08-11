@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Iterable
 import re
 import numpy as np
@@ -199,6 +200,13 @@ def add_fly(
     FlyPathCollection
         The fly path collection.
     """
+    svg_path = Path(svg_path)
+    if not svg_path.exists():
+        if not svg_path.is_absolute():
+            svg_path = get_data_dir() / svg_path
+        else:
+            raise FileNotFoundError(f"SVG file not found: {svg_path}")
+
     fly = FlyPathCollection(svg_path=svg_path, exclude=exclude, **kwargs)
 
     if bbox_exclude:
