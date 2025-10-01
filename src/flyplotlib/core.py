@@ -1,8 +1,11 @@
+"""Core functionality for plotting fly anatomical structures from SVG files."""
+
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 import re
 import numpy as np
-from matplotlib.collections import Collection, PathCollection
+from matplotlib.collections import PathCollection
+from matplotlib.patches import PathPatch
 from matplotlib.transforms import Bbox
 import matplotlib.pyplot as plt
 from xml.etree import ElementTree
@@ -22,7 +25,7 @@ def get_data_dir():
     return Path(__file__).parent / "data"
 
 
-def get_collection_bbox(collection: Collection):
+def get_bbox(objs):
     """Return the bounding box of a collection of paths.
 
     Parameters
@@ -35,7 +38,7 @@ def get_collection_bbox(collection: Collection):
     Bbox
         The bounding box of the collection.
     """
-    extents = np.array([p.get_extents() for p in collection.get_paths()])
+    extents = np.array([p.get_extents() for p in objs])
     return Bbox(np.array([extents[:, 0].min(0), extents[:, 1].max(0)]))
 
 
@@ -46,6 +49,7 @@ def get_affine_matrix(
     rotation: float,
     width: float,
     height: float,
+    scale: tuple[float, float] | float = (1, 1),
 ):
     """Return an affine transformation matrix for a collection of paths.
 
@@ -66,6 +70,9 @@ def get_affine_matrix(
     height : float
         The final height of the object. If None, it is scaled according to the
         width.
+    scale : float or tuple of float, optional
+        The scaling factor. If a float is provided, it is applied to both x and
+        y. The default is (1.0, 1.0).
 
     Returns
     -------
@@ -85,120 +92,194 @@ def get_affine_matrix(
     elif height is not None:
         affine2d.scale(height / (y1 - y0))
 
+    try:
+        affine2d.scale(*scale)
+    except TypeError:
+        affine2d.scale(scale, scale)
     affine2d.rotate_deg(rotation)
     affine2d.translate(*target_xy)
 
     return affine2d
 
 
-class FlyPathCollection(PathCollection):
-    def __init__(
-        self,
-        alpha=1,
-        grayscale=False,
-        svg_path=get_data_dir() / "fly.svg",
-        exclude: Iterable[str] = (),
-        **kwargs,
-    ):
-        """Create a fly from an SVG file.
-
-        Parameters
-        ----------
-        alpha : float, optional
-            Multiply the alpha channel of the colors by this value. The
-            default is 1.
-        grayscale : bool, optional
-            Convert the colors to grayscale. The default is False.
-        svg_path : Path, optional
-            The path to the SVG file. The default is the fly.svg file in the
-            data directory.
-        exclude : Iterable[str], optional
-            A list of regular expressions to exclude paths by their ID.
-        **kwargs
-            Additional keyword arguments passed to the PathCollection
-            constructor.
-        """
-
-        root = ElementTree.parse(svg_path).getroot()
-        elems = root.findall(".//{http://www.w3.org/2000/svg}path")
-        ids = [e.attrib.get("id", "") for e in elems]
-
-        if isinstance(exclude, str):
-            exclude = (exclude,)
-
-        is_included = [not any(re.match(r, i) for r in exclude) for i in ids]
-        elems = [e for e, i in zip(elems, is_included) if i]
-        paths = [parse_path(e.attrib["d"]) for e in elems]
-        fcs = [e.attrib.get("fill", "none") for e in elems]
-        ecs = [e.attrib.get("stroke", "none") for e in elems]
-        lws = [float(e.attrib.get("stroke_width", 0)) for e in elems]
-        alpha = [alpha * float(e.attrib.get("opacity", 1)) for e in elems]
-        alpha = np.clip(alpha, 0, 1)
-
-        if grayscale:
-            from matplotlib.colors import to_rgb
-
-            weights = np.array([0.2989, 0.5870, 0.1140])
-            fcs = [(weights @ to_rgb(c),) * 3 for c in fcs]
-
-        super().__init__(
-            paths, edgecolors=ecs, facecolors=fcs, alpha=alpha, linewidths=lws, **kwargs
-        )
-
-
-def add_fly(
-    xy=(0, 0),
-    rotation=90,
-    length=3,
-    width=None,
-    origin=(0.65, 0.5),
-    transform=None,
-    svg_path=get_data_dir() / "fly.svg",
-    exclude=(),
-    bbox_exclude=("leg", "wing"),
-    ax=None,
-    **kwargs,
-):
-    """
-    Add a fly to the current axes.
+def get_is_included(id_: str, exclude):
+    """Check if a path ID should be included based on exclusion patterns.
 
     Parameters
     ----------
-    xy : tuple, optional
-        The position of the fly in the data coordinates. The default is
-        (0, 0).
-    rotation : float, optional
-        The rotation angle in degrees. The default is 90.
-    length : float, optional
-        The length of the fly. The default is 3.
-    width : float, optional
-        The width of the fly. The default is None (scaled according to the
-        length).
-    origin : tuple, optional
-        The origin of the fly in the bounding box. (0, 0) is the
-        posterior-right corner, (1, 0) is the anterior-right corner, and
-        (0, 1) is the posterior-left corner. The default is (0.65, 0.5)
-        (thorax).
-    transform : Transform, optional
-        The transform to apply to the fly. The default is None, which
-        applies the ax.transData transform.
+    id_ : str
+        The path ID to check.
+    exclude : str or Iterable[str]
+        Regular expression patterns to exclude.
+
+    Returns
+    -------
+    bool
+        True if the ID should be included, False otherwise.
+    """
+    if isinstance(exclude, str):
+        exclude = (exclude,)
+    return not any(re.match(r, id_) for r in exclude)
+
+
+def get_path_dicts(
+    svg_path=get_data_dir() / "fly.svg",
+    exclude: Iterable[str] = (),
+    grayscale: bool = False,
+    per_path_kwargs: dict[str, dict[str, Any]] = None,
+    **global_kwargs,
+):
+    """Extract path information from SVG file and convert to matplotlib format.
+
+    Parameters
+    ----------
+    svg_path : Path, optional
+        Path to the SVG file. Default is the fly.svg file in data directory.
+    exclude : Iterable[str], optional
+        Regular expressions to exclude paths by ID.
+    grayscale : bool, optional
+        Convert colors to grayscale if True. Default is False.
+    per_path_kwargs : dict, optional
+        Per-path keyword arguments indexed by path ID.
+    **global_kwargs
+        Global keyword arguments applied to all paths.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping path IDs to dictionaries of matplotlib path properties.
+    """
+
+    def facecolor_func(x):
+        if grayscale:
+            from matplotlib.colors import to_rgb
+
+            r, g, b = to_rgb(x)
+            v = 0.2989 * r + 0.5870 * g + 0.1140 * b
+            return (v, v, v)
+        return x
+
+    def opacity_func(x):
+        return min(max(float(x), 0), 1)
+
+    if per_path_kwargs is None:
+        per_path_kwargs = {}
+
+    def identity(x):
+        return x
+
+    params = [
+        ("d", "path", "", parse_path),
+        ("fill", "facecolor", "none", facecolor_func),
+        ("stroke", "edgecolor", "none", identity),
+        ("stroke-width", "linewidth", 0, float),
+        ("opacity", "alpha", 1, opacity_func),
+    ]
+
+    root = ElementTree.parse(svg_path).getroot()
+    dicts = {}
+
+    for e in root.findall(".//{http://www.w3.org/2000/svg}path"):
+        id_ = e.attrib.get("id", "")
+
+        if not get_is_included(id_, exclude):
+            continue
+
+        dict_e = {}
+
+        for src_key, dst_key, default_value, func in params:
+            dict_e[dst_key] = func(e.attrib.get(src_key, default_value))
+
+        dict_e = dict(dict_e, **global_kwargs)
+
+        for k, v in per_path_kwargs.items():
+            if id_ in v:
+                dict_e[k] = v[id_]
+
+        dicts[id_] = dict_e
+
+    return dicts
+
+
+def vectorize_dicts(dicts):
+    """Convert a dictionary of dictionaries to vectorized format for PathCollection.
+
+    Parameters
+    ----------
+    dicts : dict
+        Dictionary of dictionaries with the same keys.
+
+    Returns
+    -------
+    dict or None
+        Vectorized dictionary suitable for PathCollection, or None if keys differ.
+    """
+    it = iter(dicts.values())
+    k0 = set(next(it).keys())
+    for d in it:
+        if set(d.keys()) != k0:
+            return None
+    return {k: [d[k] for d in dicts.values()] for k in k0}
+
+
+def add_paths(
+    svg_path,
+    xy=(0, 0),
+    width=1,
+    height=None,
+    scale=(1, 1),
+    origin=(0.5, 0.5),
+    rotation=0,
+    transform=None,
+    exclude=(),
+    bbox_exclude=(),
+    force_patches=False,
+    ax=None,
+    per_path_kwargs: dict[str, dict[str, Any]] = None,
+    **global_kwargs,
+):
+    """
+    Add SVG paths to the current axes.
+
+    Parameters
+    ----------
     svg_path : Path, optional
         The path to the SVG file. The default is the fly.svg file in the data
         directory.
+    xy : tuple, optional
+        The position of the SVG in the data coordinates. The default is
+        (0, 0).
+    width : float, optional
+        The width of the bounding box. The default is 1. If None, it is scaled
+        according to the height.
+    height : float, optional
+        The height of the bounding box. The default is None. If None, it is
+        scaled according to the width.
+    origin : tuple, optional
+        The origin of the bounding box.
+    rotation : float, optional
+        The rotation angle in degrees. The default is 0.
+    transform : Transform, optional
+        The transform to apply to the SVG. The default is None, which
+        applies the ax.transData transform.
     exclude : Iterable[str], optional
         A list of regular expressions to exclude paths by their ID.
     bbox_exclude : Iterable[str], optional
         A list of regular expressions to exclude paths when calculating the
         bounding box.
+    per_path_kwargs : dict of dict, optional
+        A dictionary of dictionaries containing keyword arguments to apply to
+        specific paths by their ID. The outer dictionary's keys are the keyword
+        argument names, and the inner dictionaries map path IDs to values.
+    global_kwargs : dict, optional
+        Additional keyword arguments to pass to all paths.
     ax : Axes, optional
-        The axes to add the fly to. The default is the current axes.
-    **kwargs
-        Additional keyword arguments passed to the PathCollection constructor.
+        The axes to add the SVG to. The default is the current axes.
 
     Returns
     -------
-    FlyPathCollection
-        The fly path collection.
+    PathCollection or dict
+        Either a PathCollection or dictionary of PathPatch objects.
     """
     svg_path = Path(svg_path)
     if not svg_path.exists():
@@ -207,21 +288,28 @@ def add_fly(
         else:
             raise FileNotFoundError(f"SVG file not found: {svg_path}")
 
-    fly = FlyPathCollection(svg_path=svg_path, exclude=exclude, **kwargs)
+    path_dicts = get_path_dicts(
+        svg_path=svg_path,
+        exclude=exclude,
+        per_path_kwargs=per_path_kwargs,
+        **global_kwargs,
+    )
+    paths = {k: v["path"] for k, v in path_dicts.items()}
 
     if bbox_exclude:
-        temp_fly = FlyPathCollection(svg_path=svg_path, exclude=bbox_exclude, **kwargs)
-        bbox = get_collection_bbox(temp_fly)
+        bbox_paths = (v for k, v in paths.items() if get_is_included(k, bbox_exclude))
     else:
-        bbox = get_collection_bbox(fly)
+        bbox_paths = paths.values()
 
+    bbox = get_bbox(bbox_paths)
     affine2d = get_affine_matrix(
         bbox=bbox,
         source_xy=origin,
         target_xy=xy,
         rotation=rotation,
-        width=length,
-        height=width,
+        width=width,
+        height=height,
+        scale=scale,
     )
 
     if ax is None:
@@ -230,8 +318,92 @@ def add_fly(
     if transform is None:
         transform = ax.transData
 
-    fly.set_transform(affine2d + transform)
-    ax.add_collection(fly)
-    ax.autoscale()
+    transform = affine2d + transform
+    vectorized_dicts = vectorize_dicts(path_dicts)
 
-    return fly
+    if not force_patches and vectorized_dicts:
+        vectorized_dicts["paths"] = vectorized_dicts.pop("path")
+        collection = PathCollection(**vectorized_dicts)
+        collection.set_transform(transform)
+        ax.add_collection(collection)
+        ax.autoscale()
+        return collection
+    else:
+        patches = {k: PathPatch(**v) for k, v in path_dicts.items()}
+        for patch in patches.values():
+            patch.set_transform(transform)
+            ax.add_patch(patch)
+        ax.autoscale()
+        return patches
+
+
+def add_fly(
+    xy=(0, 0),
+    rotation=90,
+    length=3,
+    width=None,
+    scale=(1, 1),
+    origin=(0.65, 0.5),
+    transform=None,
+    svg_path=get_data_dir() / "fly.svg",
+    exclude=(),
+    bbox_exclude=("leg", "wing"),
+    per_path_kwargs: dict[str, dict[str, Any]] = None,
+    ax=None,
+    **global_kwargs: dict[str, Any],
+):
+    """Add a fly to the current axes.
+
+    This is a convenience function that calls add_paths with fly-specific
+    default parameters.
+
+    Parameters
+    ----------
+    xy : tuple, optional
+        The position of the fly in data coordinates. Default is (0, 0).
+    rotation : float, optional
+        The rotation angle in degrees. Default is 90.
+    length : float, optional
+        The length of the fly. Default is 3.
+    width : float, optional
+        The width of the fly. If None, scaled according to length.
+    scale : tuple of float, optional
+        The scaling factor for x and y axes. Default is (1, 1).
+    origin : tuple, optional
+        The origin point for positioning. Default is (0.65, 0.5).
+    transform : Transform, optional
+        Custom matplotlib transform to apply.
+    svg_path : Path, optional
+        Path to the SVG file containing fly paths.
+    exclude : Iterable[str], optional
+        Regular expressions to exclude paths by ID.
+    bbox_exclude : Iterable[str], optional
+        Regular expressions to exclude from bounding box calculation.
+        Default excludes legs and wings.
+    per_path_kwargs : dict, optional
+        Per-path keyword arguments indexed by path ID.
+    ax : Axes, optional
+        The axes to add the fly to. Uses current axes if None.
+    global_kwargs : dict, optional
+        Global keyword arguments applied to all paths.
+
+    Returns
+    -------
+    PathCollection or dict
+        Either a PathCollection or dictionary of PathPatch objects.
+    """
+    return add_paths(
+        svg_path=svg_path,
+        xy=xy,
+        width=length,
+        height=width,
+        scale=scale,
+        origin=origin,
+        rotation=rotation,
+        transform=transform,
+        exclude=exclude,
+        bbox_exclude=bbox_exclude,
+        per_path_kwargs=per_path_kwargs,
+        ax=ax,
+        **global_kwargs,
+    )
