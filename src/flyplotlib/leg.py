@@ -1,15 +1,22 @@
-"""Module for handling fly leg muscle segments and visualization."""
+"""Fly leg muscle segments and their visualization."""
 
+from __future__ import annotations
+
+import warnings
+from collections.abc import Iterable, Mapping
 from enum import Enum
+from math import isfinite
+from pathlib import Path
+from typing import Any
+
 from flyplotlib.core import add_paths, get_data_dir
-from typing import Any, Iterable
 
 
 class Segment(Enum):
-    """Enumeration of fly leg muscle segments and anatomical parts.
+    """Fly leg muscle segments and anatomical parts.
 
-    Order and names follow those from:
-    https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07389-x/MediaObjects/41586_2024_7389_MOESM1_ESM.pdf
+    Order and names follow those from the supplementary material of
+    Lesser et al. (2024), *Nature*: https://doi.org/10.1038/s41586-024-07389-x
     """
 
     TERGOPLEURAL_OR_PLEURAL_PROMOTOR = "tergopleural_or_pleural_promotor"
@@ -38,42 +45,39 @@ class Segment(Enum):
     TARSUS_4 = "tarsus_4"
     TARSUS_5 = "tarsus_5"
 
-    @staticmethod
-    def from_str(s: str) -> "Segment | None":
-        """Convert a string to a Segment enum value.
+    @classmethod
+    def from_str(cls, s: str | Segment) -> Segment | None:
+        """Resolve a (possibly messy) string to a :class:`Segment`.
+
+        Accepts enum members, exact enum values and human-written motor neuron
+        names with arbitrary separators, abbreviations and word order.
 
         Parameters
         ----------
-        s : str
-            String representation of the segment name.
+        s : str or Segment
+            The value to resolve.
 
         Returns
         -------
-        Segment | None
-            The corresponding Segment enum value, or None if not found.
+        Segment or None
+            The matching segment, or ``None`` (with a warning) if unknown.
         """
-        return _segment_from_string(s)
+        if isinstance(s, cls):
+            return s
+        tuple_ = _mn_tuple_from_string(s)
+        segment = _mn_tuple_to_segment.get(tuple_)
+        if segment is None:
+            warnings.warn(f"Unknown motor neuron / segment: {s!r}", stacklevel=2)
+        return segment
 
 
-def _mn_tuple_from_string(s: str) -> tuple[str, ...]:
-    """Convert a string representation to a normalized tuple of words.
-
-    Parameters
-    ----------
-    s : str
-        Input string representing a motor neuron or segment name.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Normalized tuple of words representing the segment.
-    """
+def _mn_tuple_from_string(s: str | Segment) -> tuple[str, ...]:
+    """Normalize a motor neuron / segment name into a canonical word tuple."""
     if isinstance(s, Segment):
         s = s.value
     s = s.lower()
-    separators = ["/", "-", "_", ".", ","]
-    for i in separators:
-        s = s.replace(i, " ")
+    for sep in "/-_.,":
+        s = s.replace(sep, " ")
     word_map = {
         "long tendon muscle": "ltm",
         "accessory": "acc",
@@ -86,9 +90,8 @@ def _mn_tuple_from_string(s: str) -> tuple[str, ...]:
     }
     for k, v in word_map.items():
         s = s.replace(k, v)
-    words = set(s.split())
     ignored_words = {"and", "or", "mn"}
-    words = words - ignored_words
+    words = set(s.split()) - ignored_words
     tuple_ = tuple(sorted(words))
     tuple_map = {
         ("tergotr",): ("extensor", "tergotr"),
@@ -102,38 +105,13 @@ def _mn_tuple_from_string(s: str) -> tuple[str, ...]:
     return tuple_map.get(tuple_, tuple_)
 
 
-# Mapping from normalized tuple representation to Segment enum
+# Mapping from normalized tuple representation to Segment enum.
 _mn_tuple_to_segment = {
     _mn_tuple_from_string(segment.value): segment for segment in Segment
 }
 
-
-def _segment_from_string(s: str) -> Segment | None:
-    """Map a string to a Segment enum value.
-
-    Parameters
-    ----------
-    s : str
-        String representation of the segment name.
-
-    Returns
-    -------
-    Segment | None
-        The corresponding Segment enum value, or None if unknown.
-    """
-    if isinstance(s, Segment):
-        return s
-    tuple_ = _mn_tuple_from_string(s)
-    if tuple_ not in _mn_tuple_to_segment:
-        import warnings
-
-        warnings.warn(f"Unknown motor neuron: {s}")
-        return None
-    return _mn_tuple_to_segment[tuple_]
-
-
-# Mapping from Segment enum to SVG path IDs
-svg_ids = {
+# Mapping from Segment enum to SVG path IDs in ``leg.svg``.
+svg_ids: dict[Segment, str] = {
     Segment.TERGOPLEURAL_OR_PLEURAL_PROMOTOR: "Tergopleural-Pleural-promotor",
     Segment.PLEURAL_REMOTOR_AND_ABDUCTOR: "Pleural-remotor-abductor",
     Segment.STERNAL_ANTERIOR_ROTATOR: "Sternal-anterior-rotator",
@@ -160,80 +138,92 @@ svg_ids = {
     Segment.TARSUS_5: "Ta-5",
 }
 
+_svg_id_set = frozenset(svg_ids.values())
+
+
+def _to_svg_id(key: str | Segment) -> str:
+    """Resolve a segment, segment name or raw SVG ID to an SVG path ID."""
+    if key in _svg_id_set:
+        return key  # already an SVG path ID
+    segment = (
+        key
+        if isinstance(key, Segment)
+        else _mn_tuple_to_segment.get(_mn_tuple_from_string(key))
+    )
+    if segment is None:
+        raise KeyError(f"Cannot resolve {key!r} to a leg SVG path ID.")
+    return svg_ids[segment]
+
 
 def add_muscles(
-    xy=(0, 0),
-    rotation=0,
-    width=None,
-    height=1,
-    scale=(1, -1),
-    origin=(0.5, 0.5),
+    xy: tuple[float, float] = (0, 0),
+    rotation: float = 0,
+    width: float | None = None,
+    height: float | None = 1,
+    scale: tuple[float, float] | float = (1, -1),
+    origin: tuple[float, float] = (0.5, 0.5),
     transform=None,
-    svg_path=get_data_dir() / "leg.svg",
+    svg_path: str | Path | None = None,
     exclude: Iterable[str | Segment] = (),
     bbox_exclude: Iterable[str | Segment] = (),
-    force_patches=True,
+    force_patches: bool = True,
     ax=None,
-    per_path_kwargs: dict[str, dict[str, Any]] = None,
-    **global_kwargs,
+    per_path_kwargs: Mapping[str, Mapping[str | Segment, Any]] | None = None,
+    **global_kwargs: Any,
 ):
-    """Add fly leg muscles to the current axes.
+    """Add the fly leg muscles to a matplotlib axes.
 
     Parameters
     ----------
     xy : tuple, optional
-        The position of the leg in data coordinates. Default is (0, 0).
+        The position of the leg in data coordinates. The default is ``(0, 0)``.
     rotation : float, optional
-        The rotation angle in degrees. Default is 0.
-    width : float, optional
-        The width of the leg. If None, scaled according to height.
-    height : float, optional
-        The height of the leg. Default is 1.
-    scale : tuple of float, optional
-        The scaling factor for x and y axes. Default is (1, -1).
+        The rotation angle in degrees. The default is ``0``.
+    width : float or None, optional
+        The width of the leg. If ``None``, derived from ``height``.
+    height : float or None, optional
+        The height of the leg. The default is ``1``.
+    scale : float or tuple of float, optional
+        An additional scaling factor. The default is ``(1, -1)``.
     origin : tuple, optional
-        The origin point for positioning. Default is (0.5, 0.5).
+        The anchor point, in normalized coordinates. The default is
+        ``(0.5, 0.5)``.
     transform : Transform, optional
-        Custom matplotlib transform to apply.
-    svg_path : Path, optional
-        Path to the SVG file containing leg muscle paths.
-    exclude : Iterable[str | Segment], optional
-        Segment or regular expressions to exclude paths by ID.
-    bbox_exclude : Iterable[str | Segment], optional
-        Segment or regular expressions to exclude paths from bounding
-        box calculation.
+        The transform to compose with. The default is ``ax.transData``.
+    svg_path : str or Path, optional
+        Path to the SVG file. Defaults to the bundled ``leg.svg``.
+    exclude : Iterable[str or Segment], optional
+        Segments (or regular expressions) to exclude.
+    bbox_exclude : Iterable[str or Segment], optional
+        Segments (or regular expressions) to ignore for placement.
     force_patches : bool, optional
-        Force creation of individual patches instead of collection.
+        Return individual patches keyed by SVG ID instead of a single
+        ``PathCollection``. The default is ``True`` so individual muscles can be
+        styled after drawing.
     ax : Axes, optional
-        The axes to add muscles to. Uses current axes if None.
-    per_path_kwargs : dict, optional
-        Per-path keyword arguments indexed by path ID.
+        The axes to draw on. Defaults to the current axes.
+    per_path_kwargs : Mapping, optional
+        Per-path keyword arguments. The inner mapping may be keyed by
+        :class:`Segment`, a segment name or a raw SVG ID.
     **global_kwargs
-        Additional keyword arguments passed to all paths.
+        Keyword arguments applied to every path.
 
     Returns
     -------
-    Collection or dict
-        Either a PathCollection or dictionary of PathPatch objects.
+    PathCollection or dict
+        See :func:`flyplotlib.add_paths`.
     """
-    if per_path_kwargs is None:
-        per_path_kwargs = {}
-    else:
+    if svg_path is None:
+        svg_path = get_data_dir() / "leg.svg"
+
+    if per_path_kwargs is not None:
         per_path_kwargs = {
-            k: {
-                (k_ if k_ in svg_ids.values() else svg_ids[Segment.from_str(k_)]): v_
-                for k_, v_ in v.items()
-            }
-            for k, v in per_path_kwargs.items()
+            prop: {_to_svg_id(k): v for k, v in mapping.items()}
+            for prop, mapping in per_path_kwargs.items()
         }
-    bbox_exclude = [
-        svg_ids[Segment.from_str(s)] if Segment.from_str(s) is not None else s
-        for s in bbox_exclude
-    ]
-    exclude = [
-        svg_ids[Segment.from_str(s)] if Segment.from_str(s) is not None else s
-        for s in exclude
-    ]
+
+    exclude = [_segment_pattern(s) for s in exclude]
+    bbox_exclude = [_segment_pattern(s) for s in bbox_exclude]
 
     return add_paths(
         svg_path=svg_path,
@@ -253,67 +243,69 @@ def add_muscles(
     )
 
 
+def _segment_pattern(s: str | Segment) -> str:
+    """Resolve a segment to its SVG ID, leaving unknown strings as regex."""
+    if isinstance(s, str) and s in _svg_id_set:
+        return s
+    segment = Segment.from_str(s)
+    return svg_ids[segment] if segment is not None else s
+
+
 def mushow(
-    x: dict[str | Segment, float] | Iterable[float],
+    x: Mapping[str | Segment, float] | Iterable[float],
     cmap="viridis",
     norm=None,
-    vmin=None,
-    vmax=None,
-    **kwargs,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    **kwargs: Any,
 ):
-    """Display muscle activation values as colored leg muscles.
+    """Color the leg muscles by a per-muscle scalar value ("muscle imshow").
 
     Parameters
     ----------
-    x : dict or Iterable
-        Muscle activation values. Can be a dictionary mapping Segment enum
-        values or strings to float values, or an iterable of float values
-        in the order of the Segment enum.
+    x : Mapping or Iterable
+        Muscle values. Either a mapping of ``{segment: value}`` (segments may be
+        :class:`Segment` members, names or SVG IDs) or an iterable of values in
+        :class:`Segment` order. Non-finite values (e.g. ``nan``) leave the
+        corresponding muscle uncolored.
     cmap : str or Colormap, optional
-        Colormap for mapping values to colors. Default is "viridis".
+        The colormap. The default is ``"viridis"``.
     norm : Normalize, optional
-        Normalization instance for mapping values to colormap range.
-    vmin : float, optional
-        Minimum value for color scaling. Auto-computed if None.
-    vmax : float, optional
-        Maximum value for color scaling. Auto-computed if None.
+        A normalization instance. If given, ``vmin``/``vmax`` are ignored.
+    vmin, vmax : float, optional
+        The color scale limits. Auto-computed from finite values if ``None``.
     **kwargs
-        Additional keyword arguments passed to add_muscles.
+        Additional keyword arguments forwarded to :func:`add_muscles`.
 
     Returns
     -------
     tuple
-        A tuple containing the muscle visualization object and ScalarMappable
-        for creating colorbars.
+        ``(paths, mappable)`` where ``paths`` is the return value of
+        :func:`add_muscles` and ``mappable`` is a
+        :class:`~matplotlib.cm.ScalarMappable` suitable for ``colorbar``.
     """
-    from itertools import repeat
-    from math import isfinite
     from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
 
-    d = dict(zip(Segment, repeat(float("nan"))))
-    it = x.items() if isinstance(x, dict) else zip(Segment, x)
-    for k, v in it:
-        d[Segment(k)] = v
+    values = {segment: float("nan") for segment in Segment}
+    items = x.items() if isinstance(x, Mapping) else zip(Segment, x, strict=False)
+    for k, v in items:
+        segment = k if isinstance(k, Segment) else Segment.from_str(k)
+        if segment is not None:
+            values[segment] = v
 
     if norm is None:
-        from matplotlib.colors import Normalize
-
+        finite = [v for v in values.values() if isfinite(v)]
         if vmin is None:
-            vmin = min(d.values())
+            vmin = min(finite) if finite else 0.0
         if vmax is None:
-            vmax = max(d.values())
+            vmax = max(finite) if finite else 1.0
         norm = Normalize(vmin=vmin, vmax=vmax)
 
     mappable = ScalarMappable(norm=norm, cmap=cmap)
     facecolor = {
         svg_ids[k]: mappable.to_rgba(v) if isfinite(v) else "none"
-        for k, v in d.items()
+        for k, v in values.items()
         if k in svg_ids
     }
-    per_path_kwargs = {
-        "facecolor": facecolor,
-    }
-    return add_muscles(
-        per_path_kwargs=per_path_kwargs,
-        **kwargs,
-    ), mappable
+    return add_muscles(per_path_kwargs={"facecolor": facecolor}, **kwargs), mappable
