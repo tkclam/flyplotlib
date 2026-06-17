@@ -1,6 +1,6 @@
 [project]
 name = "flyplotlib"
-version = "0.6.0"
+version = "0.7.0"
 description = "Add vector graphics of fruit flies and leg muscles to matplotlib plots."
 readme = "README.md"
 license = "MIT"
@@ -18,7 +18,7 @@ classifiers = [
 dependencies = [
     "matplotlib",
     "numpy",
-    "svgpath2mpl",
+    "svg2mpl>=0.1.0",
 ]
 
 [project.optional-dependencies]

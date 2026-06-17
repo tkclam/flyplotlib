@@ -389,13 +389,13 @@ wheels = [
 
 [[package]]
 name = "flyplotlib"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "svgpath2mpl" },
+    { name = "svg2mpl" },
 ]
 
 [package.optional-dependencies]
@@ -416,7 +416,7 @@ requires-dist = [
     { name = "distinctipy", marker = "extra == 'examples'" },
     { name = "matplotlib" },
     { name = "numpy" },
-    { name = "svgpath2mpl" },
+    { name = "svg2mpl", specifier = ">=0.1.0" },
 ]
 provides-extras = ["examples"]
 
@@ -1481,6 +1481,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/28/e3/55dcc2cfbc3ca9c29519eb6884dd1415ecb53b0e934862d3559ddcb7e20b/stack_data-0.6.3.tar.gz", hash = "sha256:836a778de4fec4dcd1dcd89ed8abff8a221f58308462e1c4aa2a3cf30148f0b9", size = 44707, upload-time = "2023-09-30T13:58:05.479Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/7b/ce1eafaf1a76852e2ec9b22edecf1daa58175c090266e9f6c64afcd81d91/stack_data-0.6.3-py3-none-any.whl", hash = "sha256:d5558e0c25a4cb0853cddad3d77da9891a08cb85dd9f9f91b9f8cd66e511e695", size = 24521, upload-time = "2023-09-30T13:58:03.53Z" },
+]
+
+[[package]]
+name = "svg2mpl"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "svgpath2mpl" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e5/efde6413b167ac7ac1689abd55632e46adf28e8c0cc78115a8d6dd33a987/svg2mpl-0.1.0.tar.gz", hash = "sha256:ab011e58c4e60c68238007faad19aeefb3b9592735f7f15b0171e2d43a7a4675", size = 54308, upload-time = "2026-06-17T12:13:55.271Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b3/d2/b37bdba9529b811c6d3ba4938d26a8bb1af7c744b13394c6b25cb9b6a85e/svg2mpl-0.1.0-py3-none-any.whl", hash = "sha256:da9d4c42aabe70b91c0b14e3ba68bd9be5d40113db1e8ce6336cb0ed833c2990", size = 26914, upload-time = "2026-06-17T12:13:56.206Z" },
 ]
 
 [[package]]
