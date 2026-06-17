@@ -9,6 +9,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
+      # Required for trusted publishing (OIDC): PyPI mints a short-lived token
+      # from this identity, so no API token secret is needed.
+      id-token: write
       contents: read
 
     steps:
@@ -21,6 +24,4 @@ jobs:
         run: uv build
 
       - name: Publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-        run: uv publish
+        run: uv publish --trusted-publishing always
