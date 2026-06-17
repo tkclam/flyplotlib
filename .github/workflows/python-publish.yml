@@ -8,6 +8,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/flyplotlib
     permissions:
       # Required for trusted publishing (OIDC): PyPI mints a short-lived token
       # from this identity, so no API token secret is needed.
