@@ -25,8 +25,8 @@ or with [uv](https://docs.astral.sh/uv/):
 uv add flyplotlib
 ```
 
-Requires Python ≥ 3.10. The only runtime dependencies are `matplotlib`, `numpy`
-and `svgpath2mpl`.
+Requires Python ≥ 3.10. The runtime dependencies are `matplotlib`, `numpy`,
+`shapely` and `svg2mpl`.
 
 ## Usage
 
@@ -114,6 +114,54 @@ from flyplotlib import add_paths
 add_paths("my_drawing.svg", xy=(1, 2), rotation=45, width=3)
 ```
 
+### Add a posed NeuroMechFly
+
+`add_neuromechfly` draws a fly cartoon in an arbitrary posture, built from the
+[NeuroMechFly v2](https://github.com/NeLy-EPFL/flygym) biomechanical model. Given
+joint angles and a view, it runs forward kinematics on the model's body segments,
+projects them orthographically, and fills the silhouette of each segment's
+projected mesh (z-ordered by depth):
+
+```python
+import matplotlib.pyplot as plt
+from flyplotlib import add_neuromechfly
+
+fig, ax = plt.subplots()
+add_neuromechfly(view="right", ax=ax)          # neutral standing pose
+ax.set_aspect("equal")
+ax.autoscale()
+```
+
+`joint_angles` is a mapping of DOF name (`"{parent}-{child}-{axis}"`, e.g.
+`"c_thorax-lf_coxa-pitch"`) to angle in degrees (pass `degrees=False` for radians,
+to feed flygym simulation output directly). Unspecified DOFs fall back to the
+neutral standing pose, so any subset can be set:
+
+```python
+add_neuromechfly(
+    joint_angles={
+        "c_thorax-lf_coxa-pitch": 60,
+        "lf_coxa-lf_trochanterfemur-pitch": -60,
+        "lf_trochanterfemur-lf_tibia-pitch": 40,
+    },
+    view="right",
+)
+```
+
+`view` is one of `"left"`, `"right"`, `"front"` or `"back"`; placement
+follows the same `xy`/`rotation`/`length`/`origin` API as `add_fly`. Segments are
+drawn with black outlines by default (pass `edgecolor="none"` to disable) and
+lightly smoothed to remove the mesh's triangle "staircase" (tune or disable via
+`smoothing`). Segments can be hidden with `exclude` (regular expressions on segment
+names, e.g. `"wing"` or `"r._"` for the right legs) and recolored with `colors` (a
+`{pattern: color}` mapping); colors otherwise come from the model itself.
+`neutral_pose()` and `neuromechfly_segments()` list the available DOF and segment
+names.
+
+The body meshes and model metadata are bundled with the package, so this needs no
+`flygym`/`mujoco`. The silhouette of a given pose/view is cached, so laying out
+many flies (e.g. varying only `xy`/`rotation`/`length`) is cheap.
+
 ## Performance
 
 Parsing an SVG and computing its exact (Bézier) bounding box is expensive, so
@@ -141,6 +189,13 @@ Runnable examples live in [`examples/`](examples/).
 The fly leg muscle anatomy and motor neuron naming follow Lesser et al. (2024),
 *Connectomic reconstruction of a female Drosophila ventral nerve cord*, Nature.
 https://doi.org/10.1038/s41586-024-07389-x
+
+`add_neuromechfly` uses meshes and rigging from the
+[flygym](https://github.com/NeLy-EPFL/flygym) project (Apache-2.0; see
+`src/flyplotlib/data/neuromechfly/NOTICE`), the NeuroMechFly v2 model of
+Wang-Chen et al. (2024), *NeuroMechFly v2, simulating embodied sensorimotor
+control in adult Drosophila*, Nature Methods.
+https://doi.org/10.1038/s41592-024-02497-y
 
 ## License
 
